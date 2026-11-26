@@ -1,0 +1,98 @@
+name: Render Dear Doctor clip
+
+on:
+  workflow_dispatch:
+    inputs:
+      audio:
+        description: "Voiceover MP3 from assets/ to animate"
+        required: true
+        type: choice
+        options:
+          - video01-part1.mp3
+          - video01-part2.mp3
+          - video02-part1.mp3
+          - video02-part2.mp3
+        default: video01-part1.mp3
+      output_name:
+        description: "Output MP4 name (without .mp4)"
+        required: true
+        type: string
+        default: video01-part1
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Check out this repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Clone SadTalker
+        run: git clone --depth 1 https://github.com/OpenTalker/SadTalker.git SadTalker
+
+      - name: Cache SadTalker checkpoints and face-alignment weights
+        uses: actions/cache@v4
+        with:
+          path: |
+            SadTalker/checkpoints
+            ~/.cache/torch
+          key: sadtalker-ckpt-${{ hashFiles('scripts/checkpoint-manifest.txt') }}
+          restore-keys: |
+            sadtalker-ckpt-
+
+      - name: Download checkpoints (files already in cache are skipped)
+        run: |
+          set -e
+          mkdir -p SadTalker/checkpoints
+          cd SadTalker/checkpoints
+          RC=https://github.com/OpenTalker/SadTalker/releases/download/v0.0.2-rc
+          for f in SadTalker_V0.0.2_256.safetensors mapping_00109-model.pth.tar mapping_00229-model.pth.tar; do
+            if [ ! -s "$f" ]; then
+              echo "Downloading $f"
+              curl -fL --retry 3 -o "$f" "$RC/$f"
+            else
+              echo "Cache hit: $f"
+            fi
+          done
+          ls -lh
+
+      - name: Install CPU-only PyTorch and SadTalker requirements
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch==1.12.1+cpu torchvision==0.13.1+cpu --extra-index-url https://download.pytorch.org/whl/cpu
+          grep -v -i -E '^(gradio|av)([=<> ]|$)' SadTalker/requirements.txt > /tmp/requirements-cli.txt
+          pip install -r /tmp/requirements-cli.txt
+
+      - name: Run SadTalker inference (CPU, 256 model, no enhancer)
+        run: |
+          mkdir -p output
+          cd SadTalker
+          python inference.py \
+            --driven_audio "${{ github.workspace }}/assets/${{ inputs.audio }}" \
+            --source_image "${{ github.workspace }}/assets/dear-doctor-character.png" \
+            --checkpoint_dir ./checkpoints \
+            --result_dir ./results \
+            --size 256 \
+            --preprocess crop \
+            --cpu
+          cd ..
+          ls -lh SadTalker/results/
+          cp SadTalker/results/*.mp4 "output/${{ inputs.output_name }}.mp4"
+
+      - name: Verify output
+        run: ffprobe -hide_banner "output/${{ inputs.output_name }}.mp4"
+
+      - name: Upload rendered MP4 as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.output_name }}
+          path: output/${{ inputs.output_name }}.mp4
+          retention-days: 30
