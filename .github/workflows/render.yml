@@ -75,6 +75,8 @@ jobs:
         run: |
           mkdir -p output
           cd SadTalker
+          sudo apt-get update -qq && sudo apt-get install -y -qq execstack
+          execstack -c "$(python -c 'import torch, os; print(os.path.join(os.path.dirname(torch.__file__), "lib", "libtorch_cpu.so"))')"
           python inference.py \
             --driven_audio "${{ github.workspace }}/assets/${{ inputs.audio }}" \
             --source_image "${{ github.workspace }}/assets/dear-doctor-character.png" \
