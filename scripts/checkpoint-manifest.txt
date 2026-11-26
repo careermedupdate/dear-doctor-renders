@@ -1,0 +1,3 @@
+SadTalker_V0.0.2_256.safetensors
+mapping_00109-model.pth.tar
+mapping_00229-model.pth.tar
